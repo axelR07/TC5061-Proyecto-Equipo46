@@ -1338,7 +1338,7 @@ Para Continuous Training se propone una estrategia supervisada, condicionada a e
 
 ---
 
-## Semana 10 — Orquestación Docker Compose y CI/CD (Entregable 7)
+## Semana 10 — Orquestación, CI/CD, pruebas de carga y FinOps (Entregable 7)
 
 Responsable técnico de los puntos 1 y 2: Axel Fernando Rábago Díaz.
 Pruebas de carga, recursos, FinOps y reporte: Mónica María Ramírez Mejía.
@@ -1400,6 +1400,104 @@ El job opcional de publicación GHCR se habilita estableciendo en GitHub
 `Settings > Secrets and variables > Actions > Variables` la variable
 `PUBLISH_GHCR` con valor `true` y verificando permiso de publicación.
 Sin esa variable, CI valida y construye la imagen, pero **no la publica**.
+En la rama `main`, este workflow tampoco despliega a AWS: automatiza las
+pruebas, la construcción y el smoke test con Compose. El job opcional publica
+la imagen en GHCR, no en AWS. Consulta el [workflow de Semana 10](.github/workflows/semana10-ci.yml)
+y sus [ejecuciones en GitHub Actions](https://github.com/iplatamx/TC5061-Proyecto-Equipo46/actions/workflows/semana10-ci.yml).
+
+### Pruebas de carga, monitoreo y FinOps
+
+El escenario de [`loadtest/locustfile.py`](loadtest/locustfile.py) modela
+usuarios de MiBici con pausas de 0.5 a 2 segundos. Distribuye las tareas con
+pesos 6:2:1 entre `/predict`, `/predict/batch` (10 registros por petición) y
+`/health`. Los resultados versionados incluyen escenarios de 10, 50 y 100
+usuarios, reportes HTML, CSV de Locust y lecturas de `docker stats`.
+
+Para reproducir una corrida, levanta primero Compose según las instrucciones
+anteriores e instala Locust con `python -m pip install -r requirements-loadtest.txt`.
+Usa dos terminales: deja el monitor activo en la
+primera y ejecuta Locust en la segunda. Sustituye `50` por 10 o 100 para cada
+uno de los otros escenarios; detén el monitor con Ctrl+C al terminar la prueba.
+
+```powershell
+# Terminal 1 (ejemplo para 50 usuarios)
+.\loadtest\monitor_docker_stats.ps1 -Output reports\semana10_locust\docker_stats_u50.csv
+
+# Terminal 2 (ejemplo para 50 usuarios)
+$u = 50
+locust -f loadtest/locustfile.py --host http://localhost:8000 --headless `
+  -u $u -r 5 -t 3m --csv "reports/semana10_locust/u$u" `
+  --html "reports/semana10_locust/u$u.html"
+
+# Ejecutar una vez generados los tres escenarios (10, 50 y 100)
+python loadtest/analyze_results.py
+```
+
+Resumen de las ejecuciones guardadas en PR #20:
+
+| Usuarios | Peticiones | Errores | Peticiones/s | Inferencias/s | p50 (ms) | p95 (ms) | p99 (ms) | CPU API promedio/máx. | Memoria API máx. |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 | 1,359 | 0 | 7.62 | 21.09 | 11 | 55 | 77 | 51.5% / 90.7% | 195.0 MiB |
+| 50 | 6,553 | 0 | 36.71 | 106.59 | 57 | 130 | 230 | 212.9% / 267.0% | 190.8 MiB |
+| 100 | 9,823 | 0 | 54.96 | 158.87 | 370 | 1,600 | 2,700 | 413.1% / 499.6% | 213.0 MiB |
+
+Las tres corridas reportaron cero fallas. Al pasar de 50 a 100 usuarios,
+el throughput de inferencias subió de 106.59 a 158.87 inferencias/s, mientras
+que p95 pasó de 130 a 1,600 ms y p99 de 230 a 2,700 ms; el aumento de carga
+mejora el costo unitario estimado, pero eleva notablemente la latencia. CPU
+mayor a 100% representa el uso agregado de más de un núcleo; la gráfica usa
+100% como un núcleo. MLflow registró CPU promedio de 1.74%, 3.99% y 5.63%
+respectivamente.
+
+Gráficas generadas a partir de estos archivos:
+
+![Latencia p50 y p95 por escenario](reports/semana10_locust/figuras/01_latencia_por_escenario.png)
+
+![Peticiones e inferencias por segundo](reports/semana10_locust/figuras/02_throughput_por_escenario.png)
+
+![CPU de la API durante la carga](reports/semana10_locust/figuras/03_cpu_api.png)
+
+![Latencia p95 durante la prueba](reports/semana10_locust/figuras/04_latencia_p95_tiempo.png)
+
+Consulta el [resumen CSV](reports/semana10_locust/resumen_escenarios.csv),
+los [datos FinOps](reports/semana10_locust/finops_costo_inferencia.csv), los
+[reportes HTML de Locust para 10](reports/semana10_locust/u10.html),
+[50](reports/semana10_locust/u50.html) y
+[100 usuarios](reports/semana10_locust/u100.html), además de las
+[evidencias de ejecución](docs/evidencias_semana10/).
+
+#### Estimación FinOps
+
+La estimación usa como referencia una instancia AWS EC2 `c7i.xlarge` (4 vCPU,
+8 GiB) en `us-east-1`, con tarifas asumidas de USD 0.179/h On-Demand,
+USD 0.118/h reservada por un año y USD 0.064/h Spot. El costo unitario se
+calcula como
+`USD por millón = tarifa USD/h ÷ (inferencias/s × 3,600) × 1,000,000`.
+Los valores son estimaciones derivadas del throughput medido, no cargos
+observados en una cuenta de AWS. Las tarifas están fechadas en el análisis de
+resultados (22 de noviembre de 2026).
+
+| Usuarios | Inferencias/h estimadas | On-Demand (USD/millón) | Reservada 1 año (USD/millón) | Spot (USD/millón) |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 75,924 | 2.3576 | 1.5542 | 0.8429 |
+| 50 | 383,724 | 0.4665 | 0.3075 | 0.1668 |
+| 100 | 571,932 | 0.3130 | 0.2063 | 0.1119 |
+
+La estimación considera solo el precio de referencia de cómputo y la capacidad
+observada; no incluye almacenamiento, transferencia de datos, impuestos ni
+otros servicios cobrados por AWS. Como optimizaciones, conviene ajustar la
+concurrencia al objetivo de latencia, aprovechar el procesamiento por lotes
+cuando el cliente lo permita y comparar capacidad reservada o Spot si la carga
+es predecible o tolera interrupciones. La referencia de precio queda registrada
+en [`analyze_results.py`](loadtest/analyze_results.py) y enlaza a
+[Vantage: AWS EC2 c7i.xlarge](https://instances.vantage.sh/aws/ec2/c7i.xlarge).
+
+**Alcance de los datos:** las cifras de carga, recursos y FinOps de esta sección
+proceden de los artefactos y el código integrados en PR #20; la descripción de
+Compose y del workflow corresponde a PR #19. Locust apunta a
+`http://localhost:8000`, por lo que estos resultados describen las corridas
+versionadas en esos PR. La estimación de costos usa las tarifas de referencia
+que quedaron registradas en el análisis FinOps del PR #20.
 
 ### Evidencias y responsabilidad
 
@@ -1407,8 +1505,10 @@ Sin esa variable, CI valida y construye la imagen, pero **no la publica**.
   `model-init` completado.
 - Captura del resultado real de `python -m ops.smoke_test`.
 - Captura del workflow verde en **Actions**, con hash de commit y rama.
-- PR y commits de Axel; los archivos de Locust/FinOps y sus análisis
-  serán realizados y documentados por Mónica.
+- [PR #19: Docker Compose y CI/CD](https://github.com/iplatamx/TC5061-Proyecto-Equipo46/pull/19),
+  implementado por Axel Fernando Rábago Díaz.
+- [PR #20: Locust, monitoreo de recursos y análisis FinOps](https://github.com/iplatamx/TC5061-Proyecto-Equipo46/pull/20),
+  implementado por Mónica María Ramírez Mejía.
 
 Guía: [`docs/Semana10_Axel_Guia_Paso_a_Paso.md`](docs/Semana10_Axel_Guia_Paso_a_Paso.md).
 Notas: [`docs/Semana10_Axel_Notas_Estudio.md`](docs/Semana10_Axel_Notas_Estudio.md).
