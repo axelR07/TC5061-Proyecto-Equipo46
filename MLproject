@@ -1,0 +1,25 @@
+name: mibici
+
+python_env: python_env.yaml
+
+entry_points:
+  ingest:
+    command: "python -m mibici.dataset"
+  search_p3:
+    command: "python -m mibici.modeling.experiment_p3"
+  search_p1:
+    command: "python -m mibici.modeling.experiment_p1"
+  search_p2:
+    command: "python -m mibici.modeling.experiment_p2"
+
+  train:
+    parameters:
+      question:
+        type: string
+      model:
+        type: string
+        default: "auto"
+      hyperparameters:
+        type: string
+        default: "{}"
+    command: "python -m mibici.modeling.project_train --question {question} --model {model} --hyperparameters-json {hyperparameters}"

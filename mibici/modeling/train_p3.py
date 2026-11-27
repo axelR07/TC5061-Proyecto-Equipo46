@@ -1,4 +1,14 @@
-"""Agrupa estaciones por patrón de uso y registra P3 en MLflow."""
+
+"""Agrupa estaciones por patrón de uso y registra P3 en MLflow.
+
+Incluye:
+- Ingesta de los archivos Parquet versionados.
+- Entrenamiento de KMeans con StandardScaler.
+- Métricas de evaluación y distribución de clusters.
+- Registro de modelos con firma y ejemplo de entrada.
+- Artefactos de datos, configuración y visualización.
+- Compatibilidad con corridas individuales y nested runs.
+"""
 
 from __future__ import annotations
 
@@ -9,66 +19,87 @@ import tempfile
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from loguru import logger
+from mlflow.models import infer_signature
 from sklearn.cluster import KMeans
 from sklearn.metrics import calinski_harabasz_score, silhouette_score
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from mibici.config import (
     MANIFEST_PATH,
     MLFLOW_EXPERIMENT_NAME,
     PROCESSED_DATA_DIR,
+    PROJECT_TRAIN_DEFAULTS,
     PROJ_ROOT,
     RANDOM_SEED,
 )
 from mibici.features import build_station_profiles
-
-
-N_CLUSTERS = 3
+from mibici.modeling.data_validation import validate_station_profiles
 
 
 def load_inputs() -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Carga viajes, estaciones y metadatos de la versión del manifiesto."""
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    """Carga viajes, estaciones y manifiesto de datos."""
+    manifest = json.loads(
+        MANIFEST_PATH.read_text(encoding="utf-8")
+    )
 
     if not manifest.get("complete", False):
         raise ValueError(
-            "La ingesta está incompleta. Ejecuta primero "
-            "python -m mibici.dataset."
+            "La ingesta está incompleta. "
+            "Ejecuta primero mlflow run . -e ingest."
         )
 
     trip_files = [
-        item for item in manifest.get("files", [])
+        item
+        for item in manifest.get("files", [])
         if item.get("name", "").startswith("trips_")
     ]
+
     if not trip_files:
-        raise ValueError("El manifiesto no contiene archivos mensuales de viajes.")
+        raise ValueError(
+            "El manifiesto no contiene archivos mensuales de viajes."
+        )
 
-    trip_paths = [PROCESSED_DATA_DIR / item["name"] for item in trip_files]
+    trip_paths = [
+        PROCESSED_DATA_DIR / item["name"]
+        for item in trip_files
+    ]
+
     stations_path = PROCESSED_DATA_DIR / "stations.parquet"
-    missing = [str(path) for path in trip_paths if not path.exists()]
 
-    if missing or not stations_path.exists():
+    missing = [
+        str(path)
+        for path in [*trip_paths, stations_path]
+        if not path.exists()
+    ]
+
+    if missing:
         raise FileNotFoundError(
-            "Faltan Parquet de viajes o estaciones. "
-            "Ejecuta python -m mibici.dataset."
+            "Faltan archivos Parquet:\n"
+            + "\n".join(missing)
         )
 
     trips = pd.concat(
         [pd.read_parquet(path) for path in trip_paths],
         ignore_index=True,
     )
+
     stations = pd.read_parquet(stations_path)
+
     return trips, stations, manifest
 
 
 def git_commit() -> str:
-    """Obtiene el commit con el que se ejecuta el run."""
+    """Obtiene el commit actual para trazabilidad."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -78,35 +109,143 @@ def git_commit() -> str:
             text=True,
         )
         return result.stdout.strip()
+
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
 
 
-def main() -> None:
+def main(
+    model_name: str | None = None,
+    hyperparameters: dict | None = None,
+) -> None:
+    """Entrena y registra un modelo P3 de agrupación de estaciones."""
+    defaults = PROJECT_TRAIN_DEFAULTS["p3"]
+
+    model_name = model_name or defaults["model"]
+
+    resolved_hyperparameters = {
+        **defaults["hyperparameters"],
+        **(hyperparameters or {}),
+    }
+
+    if model_name != defaults["model"]:
+        raise ValueError(
+            f"Modelo no admitido para P3: {model_name}"
+        )
+
+    n_clusters = int(
+        resolved_hyperparameters["n_clusters"]
+    )
+    n_init = int(
+        resolved_hyperparameters["n_init"]
+    )
+    max_iter = int(
+        resolved_hyperparameters["max_iter"]
+    )
+
+    if n_clusters < 2:
+        raise ValueError(
+            "n_clusters debe ser al menos 2."
+        )
+
+    if n_init < 1:
+        raise ValueError(
+            "n_init debe ser al menos 1."
+        )
+
+    if max_iter < 1:
+        raise ValueError(
+            "max_iter debe ser al menos 1."
+        )
+
     tracking_uri = os.getenv(
         "MLFLOW_TRACKING_URI",
         (PROJ_ROOT / "mlruns").as_uri(),
     )
+
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
+    # Carga los datos y construye los perfiles de estaciones.
     trips, stations, manifest = load_inputs()
-    profiles, metadata = build_station_profiles(trips, stations)
 
-    if len(profiles) <= N_CLUSTERS:
-        raise ValueError("Se requieren más estaciones que grupos.")
+    profiles, metadata = build_station_profiles(
+        trips,
+        stations,
+    )
 
+    # Valida los perfiles y metadatos antes del entrenamiento.
+    validate_station_profiles(
+        profiles,
+        metadata,
+        report_dir=PROJ_ROOT / "reports" / "deepchecks",
+    )
+
+    if len(profiles) <= n_clusters:
+        raise ValueError(
+            "Se requieren más estaciones que grupos solicitados."
+        )
+
+    # Conservamos el mismo orden de características
+    # y tipo numérico utilizados en el baseline.
+    raw_values = profiles.to_numpy(
+        dtype="float32"
+    )
+
+    # Escalamiento y entrenamiento del modelo.
     scaler = StandardScaler()
-    values = scaler.fit_transform(profiles.to_numpy(dtype="float32"))
+    values = scaler.fit_transform(raw_values)
 
     model = KMeans(
-        n_clusters=N_CLUSTERS,
+        n_clusters=n_clusters,
         random_state=RANDOM_SEED,
-        n_init=10,
+        n_init=n_init,
+        max_iter=max_iter,
     )
+
     labels = model.fit_predict(values)
 
-    sample_size = min(10_000, len(values))
+    # Se integran los dos componentes ya entrenados.
+    # No se ejecuta fit() nuevamente.
+    pipeline = Pipeline(
+        steps=[
+            ("scaler", scaler),
+            ("kmeans", model),
+        ]
+    )
+
+    # Firma del modelo y ejemplo de entrada.
+    input_example = raw_values[:5].copy()
+
+    example_predictions = pipeline.predict(
+        input_example
+    )
+
+    signature = infer_signature(
+        input_example,
+        example_predictions,
+    )
+
+    # Validación de consistencia del pipeline.
+    pipeline_labels = pipeline.predict(
+        raw_values
+    )
+
+    if not np.array_equal(
+        labels,
+        pipeline_labels,
+    ):
+        raise RuntimeError(
+            "El pipeline produce etiquetas diferentes "
+            "al modelo original."
+        )
+
+    # Evaluación de agrupaciones.
+    sample_size = min(
+        10_000,
+        len(values),
+    )
+
     metrics = {
         "silhouette": float(
             silhouette_score(
@@ -117,44 +256,113 @@ def main() -> None:
             )
         ),
         "calinski_harabasz": float(
-            calinski_harabasz_score(values, labels)
+            calinski_harabasz_score(
+                values,
+                labels,
+            )
         ),
-        "inertia": float(model.inertia_),
-        "station_count": float(len(profiles)),
+        "inertia": float(
+            model.inertia_
+        ),
+        "station_count": float(
+            len(profiles)
+        ),
     }
 
-    for cluster_id in range(N_CLUSTERS):
+    for cluster_id in range(n_clusters):
         metrics[f"cluster_{cluster_id}_stations"] = float(
             np.sum(labels == cluster_id)
         )
 
     params = {
         "question": "P3",
-        "baseline": "KMeans_station_usage_profiles",
-        "profile": "arrivals_and_departures_by_weekday_and_hour",
-        "n_clusters": N_CLUSTERS,
+        "baseline": f"KMeans_{n_clusters}_clusters",
+        "n_clusters": n_clusters,
+        "n_init": n_init,
+        "max_iter": max_iter,
         "scaler": "StandardScaler",
         "random_seed": RANDOM_SEED,
         "station_count": len(profiles),
         "profile_dimension": profiles.shape[1],
+        "profile": "arrivals_and_departures_by_weekday_and_hour",
         "start_month": str(manifest["start_month"]),
         "end_month": str(manifest["end_month"]),
         "data_version": str(manifest["data_version"]),
     }
 
+    # Información geográfica para visualización.
     map_data = metadata.copy()
     map_data["cluster"] = labels
 
-    with mlflow.start_run(run_name="P3_kmeans_station_usage_profiles"):
-        mlflow.set_tags({
-            "team": "46",
-            "question": "P3",
-            "git_commit": git_commit(),
-            "data_version": str(manifest["data_version"]),
-        })
+    # Registro del experimento en MLflow.
+    with mlflow.start_run(
+        run_name=f"P3_kmeans_{n_clusters}_station_usage_profiles",
+        nested=mlflow.active_run() is not None,
+    ):
+        mlflow.set_tags(
+            {
+                "team": "46",
+                "question": "P3",
+                "model_family": "KMeans",
+                "stage_of_work": "candidate",
+                "git_commit": git_commit(),
+                "data_version": str(
+                    manifest["data_version"]
+                ),
+            }
+        )
+
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
 
+        # Registro del modelo entrenado.
+        model_info = mlflow.sklearn.log_model(
+            sk_model=pipeline,
+            name="model",
+            signature=signature,
+            input_example=input_example,
+        )
+
+        mlflow.set_tag(
+            "logged_model_uri",
+            model_info.model_uri,
+        )
+
+        # Registro de artefactos de datos.
+        mlflow.log_artifact(
+            str(MANIFEST_PATH),
+            artifact_path="data",
+        )
+
+        mlflow.log_dict(
+            {
+                "feature_names": list(profiles.columns),
+                "feature_count": int(profiles.shape[1]),
+                "input_dtype": "float32",
+                "feature_order_required": True,
+            },
+            "data/feature_schema.json",
+        )
+
+        # Configuración de entrenamiento.
+        mlflow.log_dict(
+            {
+                "question": "P3",
+                "model": "kmeans",
+                "hyperparameters": {
+                    "n_clusters": n_clusters,
+                    "n_init": n_init,
+                    "max_iter": max_iter,
+                    "random_state": RANDOM_SEED,
+                },
+                "preprocessing": "StandardScaler",
+                "data_version": str(manifest["data_version"]),
+                "git_commit": git_commit(),
+            },
+            "config/training_config.json",
+        )
+
+        # Gráfica de estaciones por cluster.
         with tempfile.TemporaryDirectory() as temp_dir:
             fig, ax = plt.subplots(figsize=(8, 7))
 
@@ -173,16 +381,49 @@ def main() -> None:
                 ylabel="Latitud",
                 aspect="equal",
             )
+
             ax.legend()
             fig.tight_layout()
 
-            artifact_path = Path(temp_dir) / "p3_station_clusters_map.png"
-            fig.savefig(artifact_path, dpi=160)
+            artifact_path = (
+                Path(temp_dir) / "p3_station_clusters_map.png"
+            )
+
+            fig.savefig(
+                artifact_path,
+                dpi=160,
+            )
             plt.close(fig)
-            mlflow.log_artifact(str(artifact_path), artifact_path="evidence")
+
+            mlflow.log_artifact(
+                str(artifact_path),
+                artifact_path="plots",
+            )
+
+        # Resumen final del entrenamiento.
+        mlflow.log_dict(
+            {
+                "model": "KMeans",
+                "n_clusters": n_clusters,
+                "station_count": len(profiles),
+                "silhouette": metrics["silhouette"],
+                "calinski_harabasz": metrics["calinski_harabasz"],
+                "inertia": metrics["inertia"],
+                "cluster_distribution": {
+                    str(cluster_id): int(np.sum(labels == cluster_id))
+                    for cluster_id in range(n_clusters)
+                },
+                "model_uri": model_info.model_uri,
+            },
+            "reports/p3_training_summary.json",
+        )
 
     logger.success(
-        f"Run P3 registrado. Silhouette: {metrics['silhouette']:.4f}"
+        "Run P3 registrado. "
+        f"K={n_clusters}, "
+        f"Silhouette={metrics['silhouette']:.4f}, "
+        f"Calinski-Harabasz="
+        f"{metrics['calinski_harabasz']:.4f}"
     )
 
 

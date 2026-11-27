@@ -39,9 +39,31 @@ RANDOM_SEED = 42
 MIBICI_PAGE_URL = "https://mibici.net/es/datos-abiertos/"
 MIBICI_FILES_BASE = "https://mibici.net/site/assets/files/1118/"
 TRIPS_FILE_TEMPLATE = "datos_abiertos_{year}_{month:02d}.csv"
-STATIONS_FILE = "nomenclatura_2026_09.csv"
+STATIONS_FILE = "nomenclatura_2026_10.csv"
 
 # --- MLflow -----------------------------------------------------------------
 MLFLOW_EXPERIMENT_NAME = "mibici-equipo46"  # experimento del equipo en MLflow
+
+PROJECT_TRAIN_DEFAULTS = {
+    "p1": {
+        "model": "dummy_regressor",
+        "hyperparameters": {"strategy": "mean"},
+    },
+    "p2": {
+        "model": "dummy_classifier",
+        "hyperparameters": {
+            "strategy": "most_frequent",
+            "risk_fraction": 0.10,
+        },
+    },
+    "p3": {
+        "model": "kmeans",
+        "hyperparameters": {
+            "n_clusters": 3,
+            "n_init": 10,
+            "max_iter": 300,
+        },
+    },
+}
 
 logger.info(f"PROJ_ROOT: {PROJ_ROOT}")
