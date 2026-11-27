@@ -1,6 +1,6 @@
 # Audio2Score CRUD API
 
-API REST de desarrollo para la Parte 2, validada con `../S05_S06_A1/openapi_equipo.yaml` y `../S05_S06_A1/esquema_bd.sql`.
+API REST de desarrollo para la Parte 2, validada con `openapi_equipo.yaml` y `esquema_bd.sql`, almacenados junto al backend.
 
 ## Tecnologías
 
@@ -12,7 +12,7 @@ API REST de desarrollo para la Parte 2, validada con `../S05_S06_A1/openapi_equi
 - Spotify Basic Pitch 0.4 para transcribir audio localmente a eventos de notas, sin enviar archivos a una API externa
 - `crypto.scrypt` para contraseñas nuevas, compatibilidad de lectura con bcryptjs y jsonwebtoken para JWT
 
-La ruta de la base la determina `DATABASE_PATH` (por defecto `data/audio2score`). En este equipo, `.env` apunta a `data/audio2score-consolidated-20261126`, la copia local consolidada de la base usada en la actividad S05-S06-A2. En un despliegue del equipo, PostgreSQL puede ejecutarse como servicio dedicado; esta implementación usa el mismo motor PostgreSQL embebido para desarrollo local. Al iniciar, importa `esquema_bd.sql` solo cuando la base está vacía y verifica las 13 tablas.
+La ruta de la base la determina `DATABASE_PATH` (por defecto `data/audio2score`). Esta implementación usa PostgreSQL embebido mediante PGlite para desarrollo local. Al iniciar, importa `esquema_bd.sql` solo cuando la base está vacía y verifica las 13 tablas.
 
 ## Iniciar
 

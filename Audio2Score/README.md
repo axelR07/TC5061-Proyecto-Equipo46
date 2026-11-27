@@ -108,7 +108,7 @@ node --check src/server.js
 npm.cmd run build
 ~~~
 
-La integración manual documentada, sus resultados y las limitaciones conocidas están en S10_A1/cierre_funcional.md. La guía de prueba de demo está en S11_A1/guion_demo.md.
+La matriz de trazabilidad y la retrospectiva están en `S11_A1/`. El enlace al video de demostración está en `S11_A1/demo_link.txt`.
 
 ## Variables de entorno
 
@@ -119,8 +119,8 @@ No incluyas valores secretos en documentación ni en Git. Los valores abajo desc
 | PORT | Backend | Puerto HTTP de la API | 3000 |
 | DATABASE_PATH | Backend | Directorio de datos persistentes de PGlite | ./data/audio2score |
 | UPLOAD_DIR | Backend | Directorio de audios y archivos exportados | ./data/uploads |
-| SCHEMA_FILE | Backend | Esquema SQL inicial | ../S05_S06_A1/esquema_bd.sql |
-| OPENAPI_FILE | Backend | Contrato validado al iniciar | ../S05_S06_A1/openapi_equipo.yaml |
+| SCHEMA_FILE | Backend | Esquema SQL inicial | ./esquema_bd.sql |
+| OPENAPI_FILE | Backend | Contrato validado al iniciar | ./openapi_equipo.yaml |
 | MAX_UPLOAD_BYTES | Backend | Límite de carga en bytes | 104857600 |
 | LOW_CONFIDENCE_THRESHOLD | Backend | Umbral inicial de notas que requieren revisión, entre 0 y 1 | 0.5 (provisional) |
 | JWT_SECRET | Backend | Clave privada para firmar JWT; requerida y distinta por entorno | Sin valor en plantilla |
@@ -128,17 +128,9 @@ No incluyas valores secretos en documentación ni en Git. Los valores abajo desc
 | BASIC_PITCH_PYTHON | Backend | Ruta opcional a Python para el motor de audio | Si se omite, usa backend/.venv |
 | VITE_API_URL | Frontend | Prefijo base del API | /v1 |
 
-## Capturas de la aplicación
+## Video de demostración
 
-Las capturas corresponden al frontend local de Audio2Score y muestran las vistas principales.
-
-![Inicio de sesión](S11_A1/capturas/login.png)
-
-![Lista de proyectos con datos de demo](S11_A1/capturas/proyectos.png)
-
-![Detalle de proyecto y estado del procesamiento](S11_A1/capturas/detalle_proyecto.png)
-
-![Transcripción, audio y partitura](S11_A1/capturas/transcripcion.png)
+El video está alojado en Drive porque supera el límite de tamaño de GitHub. Consulta el enlace en `S11_A1/demo_link.txt`.
 
 ## Despliegue
 
@@ -146,8 +138,5 @@ No hay una URL de producción configurada para esta versión. La aplicación des
 
 ## Documentación
 
-- SRS: S03_A1/SRS_equipo_corregido_final.md.
-- Backlog: S03_A1/backlog_completo_corregido_final.md.
-- OpenAPI y esquema de base: S05_S06_A1/.
-- Integración y cierre funcional: S07_S08_A2/ y S10_A1/.
-- Matriz de trazabilidad, retrospectiva y guía de demo: S11_A1/.
+- Contrato OpenAPI y esquema SQL: `backend/`.
+- Matriz de trazabilidad, retrospectiva y enlace al video: `S11_A1/`.
