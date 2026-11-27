@@ -18,7 +18,7 @@ Esta guía permite instalar y ejecutar el proyecto en cualquier computadora con 
 
 | Programa | Descarga | Nota |
 |---|---|---|
-| Python 3.10 o superior | https://www.python.org/downloads/ | En Windows, marcar **"Add Python to PATH"** durante la instalación |
+| Python 3.11.9 (entorno de referencia) | https://www.python.org/downloads/ | En Windows, marcar **"Add Python to PATH"** durante la instalación |
 | Git | https://git-scm.com/downloads | Opciones por defecto |
 | VS Code (opcional) | https://code.visualstudio.com/ | Cualquier terminal funciona igual |
 
@@ -29,7 +29,7 @@ Abrir una terminal (en VS Code: menú **Terminal → New Terminal**) y ejecutar 
 **1. Descargar el proyecto**
 
 ```bash
-git clone https://github.com/axelR07/TC5061-Proyecto-Equipo46.git
+git clone https://github.com/iplatamx/TC5061-Proyecto-Equipo46.git
 cd TC5061-Proyecto-Equipo46
 ```
 
@@ -1513,3 +1513,8 @@ que quedaron registradas en el análisis FinOps del PR #20.
 
 Guía: [`docs/Semana10_Axel_Guia_Paso_a_Paso.md`](docs/Semana10_Axel_Guia_Paso_a_Paso.md).
 Notas: [`docs/Semana10_Axel_Notas_Estudio.md`](docs/Semana10_Axel_Notas_Estudio.md).
+
+
+## Proyecto integrador final — Actividad 11
+
+Guía de reproducción, criterios de selección, linaje y verificación del Registry original: [Puntos 1 y 2](docs/Proyecto_Final_Puntos_1_2.md). La API final consume P1; P2 y P3 permanecen como modelos registrados de análisis. El alias `champion` representa la versión aprobada para la demostración local, no un despliegue comercial.
